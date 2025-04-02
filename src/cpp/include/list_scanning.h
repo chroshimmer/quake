@@ -11,6 +11,12 @@
 #include "faiss/utils/Heap.h"
 #include "faiss/utils/distances.h"
 
+#ifdef QUAKE_ENABLE_GPU
+#include <faiss/gpu/StandardGpuResources.h>
+#include <faiss/gpu/GpuIndexFlat.h>
+#include <cstdio>
+#endif
+
 inline Tensor calculate_recall(Tensor ids, Tensor gt_ids) {
     Tensor num_correct = torch::zeros(ids.size(0), torch::kInt64);
     int num_queries = ids.size(0);
@@ -288,6 +294,7 @@ inline void scan_list_with_ids_l2(const float *query_vec,
     }
 }
 
+// mod for gpu
 #ifdef QUAKE_ENABLE_GPU
 // New GPU scan function using Faiss GPU functions.
 inline void gpu_scan_list(const float *query_vec,
@@ -305,7 +312,8 @@ inline void gpu_scan_list(const float *query_vec,
         std::vector<float> distances(buffer.k_);
         gpu_index.search(1, query_vec, buffer.k_, distances.data(), labels.data());
         for (int i = 0; i < buffer.k_; i++) {
-            buffer.add(distances[i], labels[i]);
+            int64_t true_id = list_ids ? list_ids[labels[i]] : labels[i];
+            buffer.add(metric == faiss::METRIC_L2 ? sqrt(distances[i]) : distances[i], true_id);
         }
     } else {
         faiss::gpu::GpuIndexFlatL2 gpu_index(&res, d);
@@ -314,7 +322,8 @@ inline void gpu_scan_list(const float *query_vec,
         std::vector<float> distances(buffer.k_);
         gpu_index.search(1, query_vec, buffer.k_, distances.data(), labels.data());
         for (int i = 0; i < buffer.k_; i++) {
-            buffer.add(sqrt(distances[i]), labels[i]);
+            int64_t true_id = list_ids ? list_ids[labels[i]] : labels[i];
+            buffer.add(metric == faiss::METRIC_L2 ? sqrt(distances[i]) : distances[i], true_id);
         }
     }
 }
@@ -328,6 +337,7 @@ inline void scan_list(const float *query_vec,
                             TopkBuffer &buffer,
                             faiss::MetricType metric = faiss::METRIC_L2) {
 
+    // mod for gpu
 #ifdef QUAKE_ENABLE_GPU
     gpu_scan_list(query_vec, list_vecs, list_ids, list_size, d, buffer, metric);
 #else

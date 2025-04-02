@@ -4,6 +4,8 @@
 #include "index_partition.h"
 #include <cuda_runtime.h>
 
+#include <cstdio>
+
 class GPUIndexPartition : public IndexPartition {
 public:
     GPUIndexPartition() : IndexPartition() {}
@@ -21,7 +23,7 @@ public:
     }
 
     // override reallocate_memory to use cudaMalloc and cudaMemcpy
-    virtual void reallocate_memory(int64_t new_capacity) override {
+    virtual void reallocate_memory(int64_t new_capacity) {
         if (new_capacity < num_vectors_) {
             num_vectors_ = new_capacity;
         }
@@ -44,7 +46,7 @@ public:
     }
 
     // override free_memory to use cudaFree
-    virtual void free_memory() override {
+    virtual void free_memory() {
         if (codes_) {
             cudaFree(codes_);
             codes_ = nullptr;

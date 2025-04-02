@@ -3,6 +3,7 @@
 #include "dynamic_inverted_list.h"
 #include <iostream>
 #include <fstream>
+#include "gpu_index_partition.h"
 
 namespace faiss {
     ArrayInvertedLists *convert_to_array_invlists(DynamicInvertedLists *invlists,
@@ -48,6 +49,7 @@ namespace faiss {
             // IndexPartition ip;
 //            shared_ptr<IndexPartition> ip = std::make_shared<IndexPartition>();
 
+        // mod for gpu
         #ifdef QUAKE_ENABLE_GPU
             shared_ptr<IndexPartition> ip = std::make_shared<GPUIndexPartition>();
         #else
@@ -279,6 +281,7 @@ namespace faiss {
         }
 //        shared_ptr<IndexPartition> ip = std::make_shared<IndexPartition>();
 
+        // mod for gpu
         #ifdef QUAKE_ENABLE_GPU
             shared_ptr<IndexPartition> ip = std::make_shared<GPUIndexPartition>();
         #else

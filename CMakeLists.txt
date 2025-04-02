@@ -102,6 +102,11 @@ file(GLOB_RECURSE project_SOURCES ${project_SOURCE_DIR}/*.cpp)
 add_library(${PROJECT_NAME} SHARED ${project_SOURCES})
 set_target_properties(${PROJECT_NAME} PROPERTIES LINKER_LANGUAGE CXX)
 
+# add the definition of QUAKE_ENABLE_GPU
+if(QUAKE_ENABLE_GPU)
+    target_compile_definitions(${PROJECT_NAME} PUBLIC QUAKE_ENABLE_GPU)
+endif()
+
 target_include_directories(${PROJECT_NAME}
         PUBLIC
         ${TORCH_INCLUDE_DIRS}

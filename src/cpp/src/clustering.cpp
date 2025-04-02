@@ -10,8 +10,10 @@
 #include "index_partition.h"
 #include <list_scanning.h>
 
+#ifdef QUAKE_ENABLE_GPU
 #include <faiss/gpu/StandardGpuResources.h>
 #include <faiss/gpu/GpuIndexFlat.h>
+#endif
 
 // for debug
 #include <cstdio>
@@ -46,10 +48,15 @@ shared_ptr<Clustering> kmeans(Tensor vectors,
     std::vector<faiss::idx_t> assign_vec(n);
     std::vector<float> distance_vec(n);
 
-    if (use_gpu) {
-        // for debug
-        printf("\nUSING GPU!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+    // note: make sure enough vectors for gpu
+    if (n < n_clusters * 40) {
+        std::cerr << "Too few vectors for GPU KMeans, falling back to CPU\n";
+        use_gpu = false;
+    }
 
+    // mod for gpu
+    if (use_gpu) {
+        printf("\n!!!!! Using GPU !!!!!\n")
         faiss::gpu::StandardGpuResources res;
         faiss::gpu::GpuIndexFlatConfig index_config;
         index_config.device = 0;
@@ -71,9 +78,7 @@ shared_ptr<Clustering> kmeans(Tensor vectors,
 
         gpu_index->search(n, vectors.data_ptr<float>(), 1, distance_vec.data(), assign_vec.data());
     } else {
-        // for debug
-        printf("\nUSING CPU!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
-
+        printf("\n!!!!! Using CPU !!!!!\n")
         std::unique_ptr<faiss::IndexFlat> index_ptr;
         if (metric_type == faiss::METRIC_INNER_PRODUCT) {
             index_ptr.reset(new faiss::IndexFlatIP(d));
@@ -96,6 +101,8 @@ shared_ptr<Clustering> kmeans(Tensor vectors,
 
     vector<Tensor> cluster_vectors(n_clusters);
     vector<Tensor> cluster_ids(n_clusters);
+    // debug
+    assignments = assignments.cpu();
     for (int i = 0; i < n_clusters; i++) {
         cluster_vectors[i] = vectors.index({assignments == i});
         cluster_ids[i] = ids.index({assignments == i});
