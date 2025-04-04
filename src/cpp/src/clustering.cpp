@@ -56,7 +56,7 @@ shared_ptr<Clustering> kmeans(Tensor vectors,
 
     // mod for gpu
     if (use_gpu) {
-        printf("\n!!!!! Using GPU !!!!!\n")
+        printf("\n!!!!! Using GPU !!!!!\n");
         faiss::gpu::StandardGpuResources res;
         faiss::gpu::GpuIndexFlatConfig index_config;
         index_config.device = 0;
@@ -78,7 +78,7 @@ shared_ptr<Clustering> kmeans(Tensor vectors,
 
         gpu_index->search(n, vectors.data_ptr<float>(), 1, distance_vec.data(), assign_vec.data());
     } else {
-        printf("\n!!!!! Using CPU !!!!!\n")
+        printf("\n!!!!! Using CPU !!!!!\n");
         std::unique_ptr<faiss::IndexFlat> index_ptr;
         if (metric_type == faiss::METRIC_INNER_PRODUCT) {
             index_ptr.reset(new faiss::IndexFlatIP(d));
