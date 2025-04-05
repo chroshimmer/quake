@@ -10,10 +10,8 @@
 #include "index_partition.h"
 #include <list_scanning.h>
 
-#ifdef QUAKE_ENABLE_GPU
 #include <faiss/gpu/StandardGpuResources.h>
 #include <faiss/gpu/GpuIndexFlat.h>
-#endif
 
 // for debug
 #include <cstdio>
@@ -23,98 +21,85 @@ shared_ptr<Clustering> kmeans(Tensor vectors,
                               int n_clusters,
                               MetricType metric_type,
                               int niter,
-                              Tensor /* initial_centroids */) {
-    // Ensure enough vectors are available and sizes match.
+                              Tensor /* initial_centroids */,
+                              bool use_gpu /*=false*/) {
     assert(vectors.size(0) >= n_clusters * 2);
     assert(vectors.size(0) == ids.size(0));
 
-    // Normalize vectors for inner product
+    // debug temp
+    #ifdef QUAKE_ENABLE_GPU
+       use_gpu = true;
+    #else
+       use_gpu = false;
+    #endif
+
     if (metric_type == faiss::METRIC_INNER_PRODUCT)
         vectors = vectors / vectors.norm(2, 1).unsqueeze(1);
 
     int n = vectors.size(0);
     int d = vectors.size(1);
 
-    #ifdef QUAKE_ENABLE_GPU
-    bool use_gpu = true;
-    #else
-    bool use_gpu = false;
-    #endif
+    faiss::IndexFlat* cpu_index_ptr = nullptr;
+    faiss::gpu::GpuIndexFlat* gpu_index_ptr = nullptr;
+    faiss::Index* index_ptr = nullptr;
+
+    faiss::gpu::StandardGpuResources gpu_res;
+
+    if (use_gpu) {
+        // debug temp
+        printf("\n!!! Using GPU !!!\n");
+
+        if (metric_type == faiss::METRIC_INNER_PRODUCT)
+            gpu_index_ptr = new faiss::gpu::GpuIndexFlatIP(&gpu_res, d);
+        else
+            gpu_index_ptr = new faiss::gpu::GpuIndexFlatL2(&gpu_res, d);
+
+        index_ptr = gpu_index_ptr;
+    } else {
+        // debug temp
+        printf("\n!!! Using CPU !!!\n");
+
+        if (metric_type == faiss::METRIC_INNER_PRODUCT)
+            cpu_index_ptr = new faiss::IndexFlatIP(d);
+        else
+            cpu_index_ptr = new faiss::IndexFlatL2(d);
+
+        index_ptr = cpu_index_ptr;
+    }
 
     faiss::ClusteringParameters cp;
     cp.niter = niter;
 
-    Tensor centroids;
-    std::vector<faiss::idx_t> assign_vec(n);
+    faiss::Clustering clus(d, n_clusters, cp);
+    clus.train(n, vectors.data_ptr<float>(), *index_ptr);
+
+    Tensor centroids = torch::from_blob(clus.centroids.data(), {n_clusters, d}, torch::kFloat32).clone();
+    if (metric_type == faiss::METRIC_INNER_PRODUCT)
+        centroids = centroids / centroids.norm(2, 1).unsqueeze(1);
+
+    std::vector<idx_t> assign_vec(n);
     std::vector<float> distance_vec(n);
-
-    // note: make sure enough vectors for gpu
-    if (n < n_clusters * 40) {
-        std::cerr << "Too few vectors for GPU KMeans, falling back to CPU\n";
-        use_gpu = false;
-    }
-
-    // mod for gpu
-    if (use_gpu) {
-        printf("\n!!!!! Using GPU !!!!!\n");
-        faiss::gpu::StandardGpuResources res;
-        faiss::gpu::GpuIndexFlatConfig index_config;
-        index_config.device = 0;
-
-        std::unique_ptr<faiss::gpu::GpuIndexFlat> gpu_index;
-        if (metric_type == faiss::METRIC_INNER_PRODUCT) {
-            gpu_index.reset(new faiss::gpu::GpuIndexFlatIP(&res, d, index_config));
-        } else {
-            gpu_index.reset(new faiss::gpu::GpuIndexFlatL2(&res, d, index_config));
-        }
-
-        faiss::Clustering clus(d, n_clusters, cp);
-        clus.train(n, vectors.data_ptr<float>(), *gpu_index);
-
-        centroids = torch::from_blob(clus.centroids.data(), {n_clusters, d}, torch::kFloat32).clone();
-        if (metric_type == faiss::METRIC_INNER_PRODUCT) {
-            centroids = centroids / centroids.norm(2, 1).unsqueeze(1);
-        }
-
-        gpu_index->search(n, vectors.data_ptr<float>(), 1, distance_vec.data(), assign_vec.data());
-    } else {
-        printf("\n!!!!! Using CPU !!!!!\n");
-        std::unique_ptr<faiss::IndexFlat> index_ptr;
-        if (metric_type == faiss::METRIC_INNER_PRODUCT) {
-            index_ptr.reset(new faiss::IndexFlatIP(d));
-        } else {
-            index_ptr.reset(new faiss::IndexFlatL2(d));
-        }
-
-        faiss::Clustering clus(d, n_clusters, cp);
-        clus.train(n, vectors.data_ptr<float>(), *index_ptr);
-
-        centroids = torch::from_blob(clus.centroids.data(), {n_clusters, d}, torch::kFloat32).clone();
-        if (metric_type == faiss::METRIC_INNER_PRODUCT) {
-            centroids = centroids / centroids.norm(2, 1).unsqueeze(1);
-        }
-
-        index_ptr->search(n, vectors.data_ptr<float>(), 1, distance_vec.data(), assign_vec.data());
-    }
-
+    index_ptr->search(n, vectors.data_ptr<float>(), 1, distance_vec.data(), assign_vec.data());
     Tensor assignments = torch::from_blob(assign_vec.data(), {n}, torch::kInt64).clone();
 
     vector<Tensor> cluster_vectors(n_clusters);
     vector<Tensor> cluster_ids(n_clusters);
-    // debug
-    assignments = assignments.cpu();
     for (int i = 0; i < n_clusters; i++) {
         cluster_vectors[i] = vectors.index({assignments == i});
         cluster_ids[i] = ids.index({assignments == i});
     }
-
     Tensor partition_ids = torch::arange(n_clusters, torch::kInt64);
 
-    auto clustering = std::make_shared<Clustering>();
+    shared_ptr<Clustering> clustering = std::make_shared<Clustering>();
     clustering->centroids = centroids;
     clustering->partition_ids = partition_ids;
     clustering->vectors = cluster_vectors;
     clustering->vector_ids = cluster_ids;
+
+    if (use_gpu)
+        delete gpu_index_ptr;
+    else
+        delete cpu_index_ptr;
 
     return clustering;
 }
