@@ -326,7 +326,7 @@ inline void gpu_scan_list(const float* query_vec,  // (d,)
     // Determine distance metric
     cuvs::distance::DistanceType dist_metric = (metric == faiss::METRIC_INNER_PRODUCT)
                                    ? cuvs::distance::DistanceType::InnerProduct
-                                   : cuvs::distance::DistanceType::L2Expanded;
+                                   : cuvs::distance::DistanceType::L2SqrtExpanded;
 
     try {
         // Compute pairwise distances (1 query vs list)
@@ -483,7 +483,7 @@ inline void scan_list(const float *query_vec,
                                          std::string(cudaGetErrorString(cuda_status)));
             }
 
-            // 🔧 Map back to original list_ids
+            // Map back to original list_ids
             if (list_ids != nullptr) {
                 for (int i = 0; i < k; ++i) {
                     h_indices[i] = list_ids[h_indices[i]];
