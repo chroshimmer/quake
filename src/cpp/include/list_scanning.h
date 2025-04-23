@@ -299,6 +299,7 @@ inline void scan_list_with_ids_l2(const float *query_vec,
     }
 }
 
+#ifdef QUAKE_ENABLE_GPU
 inline void gpu_scan_list(const float* query_vec,  // (d,)
                           const float* list_vecs,  // (list_size, d)
                           const int64_t* list_ids, // (list_size,) or nullptr
@@ -306,8 +307,9 @@ inline void gpu_scan_list(const float* query_vec,  // (d,)
                           int d,
                           int k,
                           faiss::MetricType metric,
-                          float* out_distances,     // (k,)
-                          int64_t* out_indices      // (k,)
+                          float* out_distances,     // (list_size,)
+                          int64_t* out_indices,    // (k,)
+                          float* out_k_distances  // (k,)
                           ) {
     
     raft::resources handle;
@@ -343,7 +345,7 @@ inline void gpu_scan_list(const float* query_vec,  // (d,)
         auto in_val = raft::make_device_matrix_view<const float, int64_t, raft::row_major>(
             out_distances, 1, list_size);
         auto out_val = raft::make_device_matrix_view<float, int64_t, raft::row_major>(
-            out_distances, 1, k);
+            out_k_distances, 1, k);
         auto out_idx = raft::make_device_matrix_view<int64_t, int64_t, raft::row_major>(
             out_indices, 1, k);
 
@@ -364,6 +366,7 @@ inline void gpu_scan_list(const float* query_vec,  // (d,)
         throw;
     }
 }
+#endif
 
 // The main scan_list function that dispatches to one of the specialized functions.
 inline void scan_list(const float *query_vec,
@@ -378,22 +381,23 @@ inline void scan_list(const float *query_vec,
         cudaError_t cuda_status;
         // Call the GPU implementation
         int k = buffer.k_; 
+
+        // Allocate host memory for input data transfer if needed
+        float* h_query = nullptr;
+        float* h_list = nullptr;
+        int64_t* h_ids = nullptr;
+        
+        // Allocate device memory for inputs
+        float* d_query = nullptr;
+        float* d_list = nullptr;
+        int64_t* d_ids = nullptr;
+        
+        // Allocate device memory for results
+        float* d_distances = nullptr;
+        int64_t* d_indices = nullptr;
+        float* d_k_distances = nullptr;
         
         try {
-            // Allocate host memory for input data transfer if needed
-            float* h_query = nullptr;
-            float* h_list = nullptr;
-            int64_t* h_ids = nullptr;
-            
-            // Allocate device memory for inputs
-            float* d_query = nullptr;
-            float* d_list = nullptr;
-            int64_t* d_ids = nullptr;
-            
-            // Allocate device memory for results
-            float* d_distances = nullptr;
-            int64_t* d_indices = nullptr;
-            
             // Allocate and copy query vector to device
             cuda_status = cudaMalloc(&d_query, sizeof(float) * d);
             if (cuda_status != cudaSuccess) {
@@ -436,7 +440,7 @@ inline void scan_list(const float *query_vec,
             }
             
             // Allocate device memory for results
-            cuda_status = cudaMalloc(&d_distances, sizeof(float) * k);
+            cuda_status = cudaMalloc(&d_distances, sizeof(float) * list_size);
             if (cuda_status != cudaSuccess) {
                 throw std::runtime_error("Failed to allocate device memory for distances: " + 
                                          std::string(cudaGetErrorString(cuda_status)));
@@ -447,9 +451,15 @@ inline void scan_list(const float *query_vec,
                 throw std::runtime_error("Failed to allocate device memory for indices: " + 
                                          std::string(cudaGetErrorString(cuda_status)));
             }
+
+            cuda_status = cudaMalloc(&d_k_distances, sizeof(float) * k);
+            if (cuda_status != cudaSuccess) {
+                throw std::runtime_error("Failed to allocate device memory for k_distances: " + 
+                                         std::string(cudaGetErrorString(cuda_status)));
+            }
             
             // Initialize output memory
-            cuda_status = cudaMemset(d_distances, 0, sizeof(float) * k);
+            cuda_status = cudaMemset(d_distances, 0, sizeof(float) * list_size);
             if (cuda_status != cudaSuccess) {
                 throw std::runtime_error("Failed to initialize distances: " + 
                                          std::string(cudaGetErrorString(cuda_status)));
@@ -461,17 +471,23 @@ inline void scan_list(const float *query_vec,
                                          std::string(cudaGetErrorString(cuda_status)));
             }
 
+            cuda_status = cudaMemset(d_k_distances, 0, sizeof(float) * k);
+            if (cuda_status != cudaSuccess) {
+                throw std::runtime_error("Failed to initialize k_distances: " + 
+                                         std::string(cudaGetErrorString(cuda_status)));
+            }
+
             // Run GPU scan list
             gpu_scan_list(d_query, d_list, d_ids,
                         list_size, d, k,
                         metric,
-                        d_distances, d_indices);
+                        d_distances, d_indices, d_k_distances);
                         
             // Copy results back to host
             std::vector<float> h_distances(k);
             std::vector<int64_t> h_indices(k);
             
-            cuda_status = cudaMemcpy(h_distances.data(), d_distances, sizeof(float) * k, cudaMemcpyDeviceToHost);
+            cuda_status = cudaMemcpy(h_distances.data(), d_k_distances, sizeof(float) * k, cudaMemcpyDeviceToHost);
             if (cuda_status != cudaSuccess) {
                 throw std::runtime_error("Failed to copy distances from device: " + 
                                          std::string(cudaGetErrorString(cuda_status)));
@@ -516,10 +532,20 @@ inline void scan_list(const float *query_vec,
             if (d_ids) cudaFree(d_ids);
             if (d_distances) cudaFree(d_distances);
             if (d_indices) cudaFree(d_indices);
-            
+            if (d_k_distances) cudaFree(d_k_distances);
+
         } catch (const std::exception& e) {
             // Clean up any CUDA resources that might have been allocated
             cudaGetLastError(); // Clear any CUDA errors
+
+            // Free device memory
+            if (d_query) cudaFree(d_query);
+            if (d_list) cudaFree(d_list);
+            if (d_ids) cudaFree(d_ids);
+            if (d_distances) cudaFree(d_distances);
+            if (d_indices) cudaFree(d_indices);
+            if (d_k_distances) cudaFree(d_k_distances);
+
             // Re-throw the exception with more context
             throw std::runtime_error("GPU scan_list failed: " + std::string(e.what()));
         }
