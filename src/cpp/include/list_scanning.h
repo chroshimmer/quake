@@ -378,9 +378,12 @@ inline void scan_list(const float *query_vec,
                      faiss::MetricType metric = faiss::METRIC_L2) {
 
     #ifdef QUAKE_ENABLE_GPU
+        if (list_size <= 0) {
+            return;
+        }
         cudaError_t cuda_status;
         // Call the GPU implementation
-        int k = buffer.k_; 
+        int k = std::min(list_size, buffer.k_); 
 
         // Allocate host memory for input data transfer if needed
         float* h_query = nullptr;
