@@ -488,3 +488,210 @@ TEST_F(FaissIVFBenchmark, Remove) {
     std::cout << "[Faiss IVF] Remove time: " << elapsed << " ms" << std::endl;
     SUCCEED();
 }
+
+
+
+//
+// ===== GPU related Benchmarks =====
+//
+#ifdef QUAKE_ENABLE_GPU
+class QuakeIndexGPUBenchmark : public ::testing::Test {
+protected:
+    // redefine benchmark parameters
+    static const int64_t DIM = 128;
+    static const int64_t NUM_VECTORS = 100000;
+    static const int64_t N_LIST = 100;           
+    static const int64_t NUM_QUERIES = 10;     
+    static const int64_t K = 10;                  
+    static const int64_t N_PROBE = 32;             
+
+    // Data & IDs
+    torch::Tensor data_;
+    torch::Tensor ids_;
+    std::shared_ptr<QuakeIndex> index_;
+
+    // Query vectors
+    torch::Tensor queries_;
+
+    void SetUp() override {
+        // Generate random data
+        data_ = generate_data(NUM_VECTORS, DIM);
+        // Generate sequential IDs
+        ids_ = generate_ids(NUM_VECTORS);
+
+        // Generate queries
+        queries_ = generate_data(NUM_QUERIES, DIM);
+    }
+};
+
+TEST_F(QuakeIndexGPUBenchmark, BuildFlatCPUBaseline) {
+    auto build_params = std::make_shared<IndexBuildParams>();
+    build_params->nlist = 1;  // flat index
+    build_params->metric = "l2";
+
+    index_ = std::make_shared<QuakeIndex>();
+
+    auto start = high_resolution_clock::now();
+    index_->build(data_, ids_, build_params);
+    auto end = high_resolution_clock::now();
+    auto elapsed = duration_cast<milliseconds>(end - start).count();
+    std::cout << "[Build Flat Index with CPU] Build time: " << elapsed << " ms" << std::endl;
+    ASSERT_GT(elapsed, 0);
+}
+
+TEST_F(QuakeIndexGPUBenchmark, BuildFlatGPU) {
+    auto build_params = std::make_shared<IndexBuildParams>();
+    build_params->nlist = 1;  // flat index
+    build_params->metric = "l2";
+    build_params->use_gpu = true;
+
+    index_ = std::make_shared<QuakeIndex>();
+
+    auto start = high_resolution_clock::now();
+    index_->build(data_, ids_, build_params);
+    auto end = high_resolution_clock::now();
+    auto elapsed = duration_cast<milliseconds>(end - start).count();
+    std::cout << "[Build Flat Index with GPU] Build time: " << elapsed << " ms" << std::endl;
+    ASSERT_GT(elapsed, 0);
+}
+
+TEST_F(QuakeIndexGPUBenchmark, BuildIVFCPUBaseline) {
+    auto build_params = std::make_shared<IndexBuildParams>();
+    build_params->nlist = N_LIST;
+    build_params->metric = "l2";
+
+    index_ = std::make_shared<QuakeIndex>();
+
+    auto start = high_resolution_clock::now();
+    index_->build(data_, ids_, build_params);
+    auto end = high_resolution_clock::now();
+    auto elapsed = duration_cast<milliseconds>(end - start).count();
+    std::cout << "[Build IVF Index with CPU] Build time: " << elapsed << " ms" << std::endl;
+    ASSERT_GT(elapsed, 0);
+}
+
+TEST_F(QuakeIndexGPUBenchmark, BuildIVFGPU) {
+    auto build_params = std::make_shared<IndexBuildParams>();
+    build_params->nlist = N_LIST;
+    build_params->metric = "l2";
+    build_params->use_gpu = true;
+
+    index_ = std::make_shared<QuakeIndex>();
+
+    auto start = high_resolution_clock::now();
+    index_->build(data_, ids_, build_params);
+    auto end = high_resolution_clock::now();
+    auto elapsed = duration_cast<milliseconds>(end - start).count();
+    std::cout << "[Build IVF Index with GPU] Build time: " << elapsed << " ms" << std::endl;
+    ASSERT_GT(elapsed, 0);
+}
+
+TEST_F(QuakeIndexGPUBenchmark, SearchFlatCPUBaseline) {
+    auto build_params = std::make_shared<IndexBuildParams>();
+    build_params->nlist = 1;  // flat index
+    build_params->metric = "l2";
+
+    index_ = std::make_shared<QuakeIndex>();
+    index_->build(data_, ids_, build_params);
+
+    auto search_params = std::make_shared<SearchParams>();
+    search_params->k = K;
+    search_params->nprobe = 1;  // not used for flat index
+    search_params->batched_scan = false;
+
+    auto start = high_resolution_clock::now();
+    for (int i = 0; i < queries_.size(0); i++) {
+        auto result = index_->search(queries_[i].unsqueeze(0), search_params);
+    }
+    auto end = high_resolution_clock::now();
+
+    auto elapsed = duration_cast<milliseconds>(end - start).count();
+    std::cout << "[Search Flat Index with CPU] Search time: " << elapsed << " ms" << std::endl;
+    ASSERT_GT(elapsed, 0);
+}
+
+TEST_F(QuakeIndexGPUBenchmark, SearchFlatGPU) {
+    auto build_params = std::make_shared<IndexBuildParams>();
+    build_params->nlist = 1;  // flat index
+    build_params->metric = "l2";
+    build_params->use_gpu = true;
+
+    index_ = std::make_shared<QuakeIndex>();
+    index_->build(data_, ids_, build_params);
+
+    auto search_params = std::make_shared<SearchParams>();
+    search_params->k = K;
+    search_params->nprobe = 1;  // not used for flat index
+    search_params->batched_scan = false;
+    search_params->use_gpu = true;
+
+    auto start = high_resolution_clock::now();
+    for (int i = 0; i < queries_.size(0); i++) {
+        auto result = index_->search(queries_[i].unsqueeze(0), search_params);
+    }
+    auto end = high_resolution_clock::now();
+
+    auto elapsed = duration_cast<milliseconds>(end - start).count();
+    std::cout << "[Search Flat Index with GPU] Search time: " << elapsed << " ms" << std::endl;
+    ASSERT_GT(elapsed, 0);
+}
+
+TEST_F(QuakeIndexGPUBenchmark, SearchIVFCPUBaseline) {
+    auto build_params = std::make_shared<IndexBuildParams>();
+    build_params->nlist = N_LIST;
+    build_params->metric = "l2";
+
+    index_ = std::make_shared<QuakeIndex>();
+    index_->build(data_, ids_, build_params);
+
+    auto search_params = std::make_shared<SearchParams>();
+    search_params->k = K;
+    search_params->nprobe = N_PROBE;
+    search_params->batched_scan = false;
+
+    for (int i = 0; i < queries_.size(0); i++) {
+        auto result = index_->search(queries_[i].unsqueeze(0), search_params);
+    }
+
+    auto start = high_resolution_clock::now();
+    for (int i = 0; i < queries_.size(0); i++) {
+        auto result = index_->search(queries_[i].unsqueeze(0), search_params);
+    }
+    auto end = high_resolution_clock::now();
+
+    auto elapsed = duration_cast<milliseconds>(end - start).count();
+    std::cout << "[Search IVF Index with CPU] Search time: " << elapsed << " ms" << std::endl;
+    ASSERT_GT(elapsed, 0);
+}
+
+TEST_F(QuakeIndexGPUBenchmark, SearchIVFGPU) {
+    auto build_params = std::make_shared<IndexBuildParams>();
+    build_params->nlist = N_LIST;
+    build_params->metric = "l2";
+    build_params->use_gpu = true;
+
+    index_ = std::make_shared<QuakeIndex>();
+    index_->build(data_, ids_, build_params);
+
+    auto search_params = std::make_shared<SearchParams>();
+    search_params->k = K;
+    search_params->nprobe = N_PROBE;
+    search_params->batched_scan = false;
+    search_params->use_gpu = true;
+
+    for (int i = 0; i < queries_.size(0); i++) {
+        auto result = index_->search(queries_[i].unsqueeze(0), search_params);
+    }
+
+    auto start = high_resolution_clock::now();
+    for (int i = 0; i < queries_.size(0); i++) {
+        auto result = index_->search(queries_[i].unsqueeze(0), search_params);
+    }
+    auto end = high_resolution_clock::now();
+
+    auto elapsed = duration_cast<milliseconds>(end - start).count();
+    std::cout << "[Search IVF Index with GPU] Search time: " << elapsed << " ms" << std::endl;
+    ASSERT_GT(elapsed, 0);
+}
+
+#endif

@@ -531,29 +531,135 @@ TEST(QuakeIndexStressTest, SearchAddRemoveMaintenanceTest) {
 // Define the GPU related test only if FAISS GPU support is enabled
 #ifdef QUAKE_ENABLE_GPU
 // Test build with GPU enabled
-TEST(QuakeIndexGPUTest, BuildWithGPUTest) {
-    int64_t dimension = 32;
-    int64_t num_vectors = 10000;
-    int64_t nlist = 10;
+class QuakeIndexGPUTest : public ::testing::Test {
+protected:
+    // Example parameters
+    int64_t dimension_ = 32;
+    int64_t nlist_ = 10;
+    int64_t num_vectors_ = 10000;
+    int64_t num_queries_ = 100;
 
-    torch::Tensor data_vectors = generate_random_data(num_vectors, dimension);
-    torch::Tensor data_ids = generate_sequential_ids(num_vectors, 0);
+    // Data & IDs
+    torch::Tensor data_vectors_;
+    torch::Tensor data_ids_;
 
+    // Query vectors
+    torch::Tensor query_vectors_;
+
+    void SetUp() override {
+        // Generate random data
+        data_vectors_ = generate_random_data(num_vectors_, dimension_);
+        // Generate sequential IDs
+        data_ids_ = generate_sequential_ids(num_vectors_, 0);
+
+        // Queries
+        query_vectors_ = generate_random_data(num_queries_, dimension_);
+    }
+};
+
+TEST_F(QuakeIndexGPUTest, BuildWithGPUTest) {
     // Set up build parameters. Note: for a multi-partition index (nlist > 1),
     auto build_params = std::make_shared<IndexBuildParams>();
-    build_params->nlist = nlist;
+    build_params->nlist = nlist_;
+    build_params->metric = "l2";
+    build_params->niter = 5;
     build_params->use_gpu = true;
 
     QuakeIndex index;
-    auto timing_info = index.build(data_vectors, data_ids, build_params);
+    auto timing_info = index.build(data_vectors_, data_ids_, build_params);
 
     EXPECT_NE(index.partition_manager_, nullptr);
     EXPECT_NE(index.query_coordinator_, nullptr);
     EXPECT_NE(index.build_params_, nullptr);
+
+    // For a multi-partition scenario, we expect a parent_ that indexes centroids
     EXPECT_NE(index.parent_, nullptr);
 
     // Check that the timing_info fields look valid
-    EXPECT_EQ(timing_info->n_vectors, data_vectors.size(0));
-    EXPECT_EQ(timing_info->d, data_vectors.size(1));
+    EXPECT_EQ(timing_info->n_vectors, data_vectors_.size(0));
+    EXPECT_EQ(timing_info->d, data_vectors_.size(1));
+}
+
+TEST_F(QuakeIndexGPUTest, BuildFlatTestGPU) {
+    auto build_params = std::make_shared<IndexBuildParams>();
+    build_params->nlist = 1;  // "Flat"
+    build_params->metric = "ip";
+    build_params->niter = 3;
+    build_params->use_gpu = true;
+
+    QuakeIndex index;
+    auto timing_info = index.build(data_vectors_, data_ids_, build_params);
+
+    // parent_ should be nullptr because we only have a single partition
+    EXPECT_EQ(index.parent_, nullptr);
+
+    // partition_manager_ & query_coordinator_ should exist
+    EXPECT_NE(index.partition_manager_, nullptr);
+    EXPECT_NE(index.query_coordinator_, nullptr);
+
+    // Check that the timing_info fields look valid
+    EXPECT_EQ(timing_info->n_vectors, data_vectors_.size(0));
+    EXPECT_EQ(timing_info->d, data_vectors_.size(1));
+}
+
+// Test serial search with GPU enabled
+TEST_F(QuakeIndexGPUTest, SearchPartitionedTestGPU) {
+    // Set up build parameters for GPU
+    auto build_params = std::make_shared<IndexBuildParams>();
+    build_params->nlist = nlist_;
+    build_params->use_gpu = true;
+    build_params->metric = "l2";
+
+    // Build index
+    QuakeIndex index;
+    index.build(data_vectors_, data_ids_, build_params);
+
+    // Set up search parameters
+    auto search_params = std::make_shared<SearchParams>();
+    search_params->nprobe = 4;
+    search_params->k = 5;
+    search_params->use_gpu = true;
+
+    // Perform GPU search
+    auto search_result = index.search(query_vectors_, search_params);
+    Tensor ret_ids = search_result->ids;
+    Tensor ret_dis = search_result->distances;
+    shared_ptr<SearchTimingInfo> timing_info = search_result->timing_info;
+
+    // Validate shapes
+    ASSERT_EQ(ret_ids.size(0), query_vectors_.size(0));
+    ASSERT_EQ(ret_ids.size(1), search_params->k);
+    ASSERT_EQ(ret_dis.size(0), query_vectors_.size(0));
+    ASSERT_EQ(ret_dis.size(1), search_params->k);
+}
+
+TEST_F(QuakeIndexGPUTest, SearchFlatTestGPU) {
+    // Set up build parameters for GPU
+    auto build_params = std::make_shared<IndexBuildParams>();
+    // build_params->nlist = nlist;
+    build_params->use_gpu = true;
+    build_params->metric = "l2";
+
+    // Build index
+    QuakeIndex index;
+    index.build(data_vectors_, data_ids_, build_params);
+
+    // Set up search parameters
+    auto search_params = std::make_shared<SearchParams>();
+    search_params->nprobe = 4;
+    search_params->k = 5;
+    search_params->use_gpu = true;
+
+    // Perform GPU search
+    auto search_result = index.search(query_vectors_, search_params);
+    Tensor ret_ids = search_result->ids;
+    Tensor ret_dis = search_result->distances;
+    shared_ptr<SearchTimingInfo> timing_info = search_result->timing_info;
+
+    // Validate shapes
+    ASSERT_EQ(ret_ids.size(0), query_vectors_.size(0));
+    ASSERT_EQ(ret_ids.size(1), search_params->k);
+    ASSERT_EQ(ret_dis.size(0), query_vectors_.size(0));
+    ASSERT_EQ(ret_dis.size(1), search_params->k);
 }
 #endif

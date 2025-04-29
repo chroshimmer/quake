@@ -178,6 +178,9 @@ struct SearchParams {
     float initial_search_fraction = DEFAULT_INITIAL_SEARCH_FRACTION;
     int aps_flush_period_us = DEFAULT_APS_FLUSH_PERIOD_US;
 
+    // gpu index build params
+    bool use_gpu = false;
+
     SearchParams() = default;
 };
 

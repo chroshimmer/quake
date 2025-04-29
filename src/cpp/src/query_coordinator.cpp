@@ -546,13 +546,16 @@ shared_ptr<SearchResult> QueryCoordinator::serial_scan(Tensor x, Tensor partitio
             int64_t *list_ids = (int64_t *) partition_manager_->partition_store_->get_ids(pi);
             int64_t list_size = partition_manager_->partition_store_->list_size(pi);
 
+            bool use_gpu_ = search_params->use_gpu;
+
             scan_list(query_vec,
                       list_vectors,
                       list_ids,
                       partition_manager_->partition_store_->list_size(pi),
                       dimension,
                       *topk_buf,
-                      metric_);
+                      metric_,
+                      use_gpu_);
 
             float curr_radius = topk_buf->get_kth_distance();
             float percent_change = abs(curr_radius - query_radius) / curr_radius;
