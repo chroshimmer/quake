@@ -333,6 +333,13 @@ inline void gpu_scan_list(const float* query_vec,  // (d,)
                                    : cuvs::distance::DistanceType::L2SqrtExpanded;
 
     try {
+        cudaEvent_t start;
+        cudaEvent_t stop;
+        cudaEventCreate(&start);
+        cudaEventCreate(&stop);
+
+        cudaEventRecord(start);
+
         // Compute pairwise distances (1 query vs list)
         cuvs::distance::pairwise_distance(handle, query_view, list_view, dist_view, dist_metric);
         
@@ -362,6 +369,15 @@ inline void gpu_scan_list(const float* query_vec,  // (d,)
             throw std::runtime_error("CUDA error after select_k: " + 
                                      std::string(cudaGetErrorString(cuda_status)));
         }
+
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+
+        float ms;
+        cudaEventElapsedTime(&ms, start, stop);
+
+        std::cout << "[Actual search time in gpu_scan_list]" << ms << " ms" << std::endl;
+
     } catch (const std::exception& e) {
         // Cleanup any CUDA errors to avoid affecting other operations
         cudaGetLastError();

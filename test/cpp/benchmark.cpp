@@ -499,11 +499,11 @@ class QuakeIndexGPUBenchmark : public ::testing::Test {
 protected:
     // redefine benchmark parameters
     static const int64_t DIM = 128;
-    static const int64_t NUM_VECTORS = 100000;
-    static const int64_t N_LIST = 100;           
+    static const int64_t NUM_VECTORS = 8000000;
+    static const int64_t N_LIST = 100000;           
     static const int64_t NUM_QUERIES = 10;     
     static const int64_t K = 10;                  
-    static const int64_t N_PROBE = 32;             
+    static const int64_t N_PROBE = 64;             
 
     // Data & IDs
     torch::Tensor data_;
@@ -524,36 +524,36 @@ protected:
     }
 };
 
-TEST_F(QuakeIndexGPUBenchmark, BuildFlatCPUBaseline) {
-    auto build_params = std::make_shared<IndexBuildParams>();
-    build_params->nlist = 1;  // flat index
-    build_params->metric = "l2";
+// TEST_F(QuakeIndexGPUBenchmark, BuildFlatCPUBaseline) {
+//     auto build_params = std::make_shared<IndexBuildParams>();
+//     build_params->nlist = 1;  // flat index
+//     build_params->metric = "l2";
 
-    index_ = std::make_shared<QuakeIndex>();
+//     index_ = std::make_shared<QuakeIndex>();
 
-    auto start = high_resolution_clock::now();
-    index_->build(data_, ids_, build_params);
-    auto end = high_resolution_clock::now();
-    auto elapsed = duration_cast<milliseconds>(end - start).count();
-    std::cout << "[Build Flat Index with CPU] Build time: " << elapsed << " ms" << std::endl;
-    ASSERT_GT(elapsed, 0);
-}
+//     auto start = high_resolution_clock::now();
+//     index_->build(data_, ids_, build_params);
+//     auto end = high_resolution_clock::now();
+//     auto elapsed = duration_cast<milliseconds>(end - start).count();
+//     std::cout << "[Build Flat Index with CPU] Build time: " << elapsed << " ms" << std::endl;
+//     ASSERT_GT(elapsed, 0);
+// }
 
-TEST_F(QuakeIndexGPUBenchmark, BuildFlatGPU) {
-    auto build_params = std::make_shared<IndexBuildParams>();
-    build_params->nlist = 1;  // flat index
-    build_params->metric = "l2";
-    build_params->use_gpu = true;
+// TEST_F(QuakeIndexGPUBenchmark, BuildFlatGPU) {
+//     auto build_params = std::make_shared<IndexBuildParams>();
+//     build_params->nlist = 1;  // flat index
+//     build_params->metric = "l2";
+//     build_params->use_gpu = true;
 
-    index_ = std::make_shared<QuakeIndex>();
+//     index_ = std::make_shared<QuakeIndex>();
 
-    auto start = high_resolution_clock::now();
-    index_->build(data_, ids_, build_params);
-    auto end = high_resolution_clock::now();
-    auto elapsed = duration_cast<milliseconds>(end - start).count();
-    std::cout << "[Build Flat Index with GPU] Build time: " << elapsed << " ms" << std::endl;
-    ASSERT_GT(elapsed, 0);
-}
+//     auto start = high_resolution_clock::now();
+//     index_->build(data_, ids_, build_params);
+//     auto end = high_resolution_clock::now();
+//     auto elapsed = duration_cast<milliseconds>(end - start).count();
+//     std::cout << "[Build Flat Index with GPU] Build time: " << elapsed << " ms" << std::endl;
+//     ASSERT_GT(elapsed, 0);
+// }
 
 TEST_F(QuakeIndexGPUBenchmark, BuildIVFCPUBaseline) {
     auto build_params = std::make_shared<IndexBuildParams>();
@@ -578,12 +578,20 @@ TEST_F(QuakeIndexGPUBenchmark, BuildIVFGPU) {
 
     index_ = std::make_shared<QuakeIndex>();
 
-    auto start = high_resolution_clock::now();
+    cudaEvent_t start;
+    cudaEvent_t stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    cudaEventRecord(start);
     index_->build(data_, ids_, build_params);
-    auto end = high_resolution_clock::now();
-    auto elapsed = duration_cast<milliseconds>(end - start).count();
-    std::cout << "[Build IVF Index with GPU] Build time: " << elapsed << " ms" << std::endl;
-    ASSERT_GT(elapsed, 0);
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+
+    float ms;
+    cudaEventElapsedTime(&ms, start, stop);
+    std::cout << "[Build IVF Index with GPU] Build time: " << ms << " ms" << std::endl;
+    ASSERT_GT(ms, 0);
 }
 
 TEST_F(QuakeIndexGPUBenchmark, SearchFlatCPUBaseline) {
@@ -625,15 +633,23 @@ TEST_F(QuakeIndexGPUBenchmark, SearchFlatGPU) {
     search_params->batched_scan = false;
     search_params->use_gpu = true;
 
-    auto start = high_resolution_clock::now();
+    cudaEvent_t start;
+    cudaEvent_t stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    cudaEventRecord(start);
     for (int i = 0; i < queries_.size(0); i++) {
         auto result = index_->search(queries_[i].unsqueeze(0), search_params);
     }
-    auto end = high_resolution_clock::now();
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
 
-    auto elapsed = duration_cast<milliseconds>(end - start).count();
-    std::cout << "[Search Flat Index with GPU] Search time: " << elapsed << " ms" << std::endl;
-    ASSERT_GT(elapsed, 0);
+    float ms;
+    cudaEventElapsedTime(&ms, start, stop);
+
+    std::cout << "[Search Flat Index with GPU] Search time: " << ms << " ms" << std::endl;
+    ASSERT_GT(ms, 0);
 }
 
 TEST_F(QuakeIndexGPUBenchmark, SearchIVFCPUBaseline) {
@@ -648,10 +664,6 @@ TEST_F(QuakeIndexGPUBenchmark, SearchIVFCPUBaseline) {
     search_params->k = K;
     search_params->nprobe = N_PROBE;
     search_params->batched_scan = false;
-
-    for (int i = 0; i < queries_.size(0); i++) {
-        auto result = index_->search(queries_[i].unsqueeze(0), search_params);
-    }
 
     auto start = high_resolution_clock::now();
     for (int i = 0; i < queries_.size(0); i++) {
@@ -679,19 +691,23 @@ TEST_F(QuakeIndexGPUBenchmark, SearchIVFGPU) {
     search_params->batched_scan = false;
     search_params->use_gpu = true;
 
+    cudaEvent_t start;
+    cudaEvent_t stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    cudaEventRecord(start);
     for (int i = 0; i < queries_.size(0); i++) {
         auto result = index_->search(queries_[i].unsqueeze(0), search_params);
     }
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
 
-    auto start = high_resolution_clock::now();
-    for (int i = 0; i < queries_.size(0); i++) {
-        auto result = index_->search(queries_[i].unsqueeze(0), search_params);
-    }
-    auto end = high_resolution_clock::now();
+    float ms;
+    cudaEventElapsedTime(&ms, start, stop);
 
-    auto elapsed = duration_cast<milliseconds>(end - start).count();
-    std::cout << "[Search IVF Index with GPU] Search time: " << elapsed << " ms" << std::endl;
-    ASSERT_GT(elapsed, 0);
+    std::cout << "[Search IVF Index with GPU] Search time: " << ms << " ms" << std::endl;
+    ASSERT_GT(ms, 0);
 }
 
 #endif
