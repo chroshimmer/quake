@@ -534,53 +534,88 @@ shared_ptr<SearchResult> QueryCoordinator::serial_scan(Tensor x, Tensor partitio
                                                             cluster_centroids,
                                                             metric_ == faiss::METRIC_L2);
         }
-        for (int p = 0; p < num_parts; p++) {
-            int64_t pi = partition_ids_accessor[q][p];
 
-            if (pi == -1) {
-                continue; // Skip invalid partitions
+        bool use_gpu_ = search_params->use_gpu;
+        if (use_gpu_) {
+            #ifdef QUAKE_ENABLE_GPU
+            // define 
+            std::vector<float> all_list_vectors;
+            std::vector<int64_t> all_list_ids;
+            size_t total_list_size = 0;
+
+            for (int p = 0; p < num_parts; p++) {
+                int64_t pi = partition_ids_accessor[q][p];
+
+                if (pi == -1) {
+                    continue; // Skip invalid partitions
+                }
+                
+                float *list_vectors = (float *) partition_manager_->partition_store_->get_codes(pi);
+                int64_t *list_ids = (int64_t *) partition_manager_->partition_store_->get_ids(pi);
+                int64_t list_size = partition_manager_->partition_store_->list_size(pi);
+
+                all_list_vectors.insert(all_list_vectors.end(), list_vectors, list_vectors + list_size * dimension);
+                all_list_ids.insert(all_list_ids.end(), list_ids, list_ids + list_size);
+                total_list_size += list_size;
             }
 
-            start_time = high_resolution_clock::now();
-            float *list_vectors = (float *) partition_manager_->partition_store_->get_codes(pi);
-            int64_t *list_ids = (int64_t *) partition_manager_->partition_store_->get_ids(pi);
-            int64_t list_size = partition_manager_->partition_store_->list_size(pi);
-
-            bool use_gpu_ = search_params->use_gpu;
-
-            scan_list(query_vec,
-                      list_vectors,
-                      list_ids,
-                      partition_manager_->partition_store_->list_size(pi),
-                      dimension,
-                      *topk_buf,
-                      metric_,
-                      use_gpu_);
-
-            float curr_radius = topk_buf->get_kth_distance();
-            float percent_change = abs(curr_radius - query_radius) / curr_radius;
-
-            start_time = high_resolution_clock::now();
-            if (use_aps) {
-                if (percent_change > search_params->recompute_threshold) {
-                    query_radius = curr_radius;
-
-                    partition_probs = compute_recall_profile(boundary_distances,
-                                                             query_radius,
-                                                             dimension,
-                                                             {},
-                                                             search_params->use_precomputed,
-                                                             metric_ == faiss::METRIC_L2);
+            gpu_scan_list(
+                query_vec,
+                all_list_vectors.data(),
+                all_list_ids.data(),
+                total_list_size,
+                dimension,
+                *topk_buf,
+                metric_
+            );
+            #endif
+        } else {
+            for (int p = 0; p < num_parts; p++) {
+                int64_t pi = partition_ids_accessor[q][p];
+    
+                if (pi == -1) {
+                    continue; // Skip invalid partitions
                 }
-                float recall_estimate = 0.0;
-                for (int i = 0; i < p; i++) {
-                    recall_estimate += partition_probs[i];
-                }
-                if (recall_estimate >= search_params->recall_target) {
-                    break;
+    
+                start_time = high_resolution_clock::now();
+                float *list_vectors = (float *) partition_manager_->partition_store_->get_codes(pi);
+                int64_t *list_ids = (int64_t *) partition_manager_->partition_store_->get_ids(pi);
+                int64_t list_size = partition_manager_->partition_store_->list_size(pi);
+    
+                scan_list(query_vec,
+                          list_vectors,
+                          list_ids,
+                          partition_manager_->partition_store_->list_size(pi),
+                          dimension,
+                          *topk_buf,
+                          metric_);
+    
+                float curr_radius = topk_buf->get_kth_distance();
+                float percent_change = abs(curr_radius - query_radius) / curr_radius;
+    
+                start_time = high_resolution_clock::now();
+                if (use_aps) {
+                    if (percent_change > search_params->recompute_threshold) {
+                        query_radius = curr_radius;
+    
+                        partition_probs = compute_recall_profile(boundary_distances,
+                                                                 query_radius,
+                                                                 dimension,
+                                                                 {},
+                                                                 search_params->use_precomputed,
+                                                                 metric_ == faiss::METRIC_L2);
+                    }
+                    float recall_estimate = 0.0;
+                    for (int i = 0; i < p; i++) {
+                        recall_estimate += partition_probs[i];
+                    }
+                    if (recall_estimate >= search_params->recall_target) {
+                        break;
+                    }
                 }
             }
         }
+        
         // Retrieve the top-k results for query q.
         all_topk_dists[q] = topk_buf->get_topk();
         all_topk_ids[q] = topk_buf->get_topk_indices();
