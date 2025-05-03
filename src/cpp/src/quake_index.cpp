@@ -69,8 +69,15 @@ shared_ptr<BuildTimingInfo> QuakeIndex::build(Tensor x, Tensor ids, shared_ptr<I
         shared_ptr<Clustering> clustering = make_shared<Clustering>();
         clustering->partition_ids = torch::tensor({0}, torch::kInt64);
         clustering->centroids = x.mean(0, true);
-        clustering->vectors = {x};
-        clustering->vector_ids = {ids};
+        if (build_params_->use_gpu) {
+            clustering->vectors = {x.to(torch::kCUDA)};
+            clustering->vector_ids = {ids.to(torch::kCUDA)};
+            clustering->is_on_gpu = true;
+        } else {
+            clustering->vectors = {x};
+            clustering->vector_ids = {ids};
+            clustering->is_on_gpu = false;
+        }
 
         partition_manager_->init_partitions(parent_, clustering);
     }

@@ -400,16 +400,9 @@ inline void gpu_scan_list(
     cudaError_t cuda_status;
     // Call the GPU implementation
     int k = std::min(list_size, buffer.k_); 
-
-    // Allocate host memory for input data transfer if needed
-    float* h_query = nullptr;
-    float* h_list = nullptr;
-    int64_t* h_ids = nullptr;
     
     // Allocate device memory for inputs
     float* d_query = nullptr;
-    float* d_list = nullptr;
-    int64_t* d_ids = nullptr;
     
     // Allocate device memory for results
     float* d_distances = nullptr;
@@ -428,34 +421,6 @@ inline void gpu_scan_list(
         if (cuda_status != cudaSuccess) {
             throw std::runtime_error("Failed to copy query to device: " + 
                                     std::string(cudaGetErrorString(cuda_status)));
-        }
-        
-        // Allocate and copy list vectors to device
-        cuda_status = cudaMalloc(&d_list, sizeof(float) * list_size * d);
-        if (cuda_status != cudaSuccess) {
-            throw std::runtime_error("Failed to allocate device memory for list: " + 
-                                    std::string(cudaGetErrorString(cuda_status)));
-        }
-        
-        cuda_status = cudaMemcpy(d_list, list_vecs, sizeof(float) * list_size * d, cudaMemcpyHostToDevice);
-        if (cuda_status != cudaSuccess) {
-            throw std::runtime_error("Failed to copy list to device: " + 
-                                    std::string(cudaGetErrorString(cuda_status)));
-        }
-        
-        // Handle list_ids if needed
-        if (list_ids != nullptr) {
-            cuda_status = cudaMalloc(&d_ids, sizeof(int64_t) * list_size);
-            if (cuda_status != cudaSuccess) {
-                throw std::runtime_error("Failed to allocate device memory for ids: " + 
-                                        std::string(cudaGetErrorString(cuda_status)));
-            }
-            
-            cuda_status = cudaMemcpy(d_ids, list_ids, sizeof(int64_t) * list_size, cudaMemcpyHostToDevice);
-            if (cuda_status != cudaSuccess) {
-                throw std::runtime_error("Failed to copy ids to device: " + 
-                                        std::string(cudaGetErrorString(cuda_status)));
-            }
         }
         
         // Allocate device memory for results
@@ -497,7 +462,7 @@ inline void gpu_scan_list(
         }
 
         // Run GPU scan list
-        gpu_select_k(d_query, d_list, d_ids,
+        gpu_select_k(d_query, list_vecs, list_ids,
                     list_size, d, k,
                     metric,
                     d_distances, d_indices, d_k_distances);
@@ -520,8 +485,10 @@ inline void gpu_scan_list(
 
         // Map back to original list_ids
         if (list_ids != nullptr) {
+            std::vector<int64_t> h_list_ids(list_size);
+            cudaMemcpy(h_list_ids.data(), list_ids, list_size * sizeof(int64_t), cudaMemcpyDeviceToHost);
             for (int i = 0; i < k; ++i) {
-                h_indices[i] = list_ids[h_indices[i]];
+                h_indices[i] = h_list_ids[h_indices[i]];
             }
         }
 
@@ -547,8 +514,6 @@ inline void gpu_scan_list(
 
         // Free device memory
         if (d_query) cudaFree(d_query);
-        if (d_list) cudaFree(d_list);
-        if (d_ids) cudaFree(d_ids);
         if (d_distances) cudaFree(d_distances);
         if (d_indices) cudaFree(d_indices);
         if (d_k_distances) cudaFree(d_k_distances);
@@ -559,8 +524,6 @@ inline void gpu_scan_list(
 
         // Free device memory
         if (d_query) cudaFree(d_query);
-        if (d_list) cudaFree(d_list);
-        if (d_ids) cudaFree(d_ids);
         if (d_distances) cudaFree(d_distances);
         if (d_indices) cudaFree(d_indices);
         if (d_k_distances) cudaFree(d_k_distances);

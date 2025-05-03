@@ -94,7 +94,7 @@ shared_ptr<Clustering> kmeans_cuvs_sample_and_predict(
     );
     }
 
-    Tensor all_labels = torch::empty({N}, torch::kLong);
+    Tensor all_labels = torch::empty({N}, torch::TensorOptions().dtype(torch::kLong).device(torch::kCUDA));
 
     auto predict_fn = [&](Tensor batch_cpu, int64_t off) {
     int64_t bs = batch_cpu.size(0);
@@ -134,7 +134,6 @@ shared_ptr<Clustering> kmeans_cuvs_sample_and_predict(
     all_labels.narrow(0, off, bs)
               .copy_(
                 labels32.to(torch::kLong)
-                        .to(torch::kCPU)
               );
     };
 
@@ -160,8 +159,9 @@ shared_ptr<Clustering> kmeans_cuvs_sample_and_predict(
     // 8) group on CPU
     Tensor sorted_lbl, sorted_idx;
     std::tie(sorted_lbl, sorted_idx) = torch::sort(all_labels);
-    Tensor sorted_vecs = vectors.index_select(0, sorted_idx);
-    Tensor sorted_ids  = ids.index_select(0, sorted_idx);
+    // keep codes and ids staying on GPU
+    Tensor sorted_vecs = vectors.to(torch::kCUDA).index_select(0, sorted_idx);
+    Tensor sorted_ids  = ids.to(torch::kCUDA).index_select(0, sorted_idx);
 
     Tensor counts = torch::bincount(sorted_lbl, /*weights=*/{}, num_clusters);
     auto cnt_cpu = counts.to(torch::kCPU);
@@ -178,6 +178,7 @@ shared_ptr<Clustering> kmeans_cuvs_sample_and_predict(
     out->partition_ids = torch::arange(num_clusters, torch::kLong);
     out->vectors       = std::move(cluster_vecs);
     out->vector_ids    = std::move(cluster_ids);
+    out->is_on_gpu     = true;
 
     return out;
 }

@@ -39,14 +39,24 @@ namespace faiss {
     }
 
 
-    DynamicInvertedLists::DynamicInvertedLists(size_t nlist, size_t code_size)
-        : InvertedLists(nlist, code_size) {
+    DynamicInvertedLists::DynamicInvertedLists(size_t nlist, size_t code_size, bool use_gpu)
+        : InvertedLists(nlist, code_size), use_gpu_(use_gpu) {
         d_ = code_size / sizeof(float);
         code_size_ = code_size;
         // Initialize empty partitions
         for (size_t i = 0; i < nlist; i++) {
             // IndexPartition ip;
-            shared_ptr<IndexPartition> ip = std::make_shared<IndexPartition>();
+            shared_ptr<IndexPartition> ip = nullptr;
+            // Check if GPU support is enabled and use GPUIndexPartition if available
+            if (use_gpu_) {
+            #ifdef QUAKE_ENABLE_GPU
+                ip = std::make_shared<GPUIndexPartition>();
+            #else
+                throw std::runtime_error("GPU support is not enabled. Please compile with QUAKE_ENABLE_GPU.");
+            #endif
+            } else {
+                ip = std::make_shared<IndexPartition>();
+            }
             ip->set_code_size(code_size);
             partitions_[i] = ip;
         }
@@ -270,7 +280,17 @@ namespace faiss {
         if (partitions_.find(list_no) != partitions_.end()) {
             throw std::runtime_error("List already exists in add_list");
         }
-        shared_ptr<IndexPartition> ip = std::make_shared<IndexPartition>();
+        shared_ptr<IndexPartition> ip = nullptr;
+        // Check if we need to use GPUIndexPartition
+        if (use_gpu_) {
+        #ifdef QUAKE_ENABLE_GPU
+            ip = std::make_shared<GPUIndexPartition>();
+        #else
+            throw std::runtime_error("GPU support is not enabled. Please compile with QUAKE_ENABLE_GPU.");
+        #endif
+        } else {
+            ip = std::make_shared<IndexPartition>();
+        }
         ip->set_code_size((int64_t) code_size);
         partitions_[list_no] = ip;
         nlist++;

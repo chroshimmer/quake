@@ -105,7 +105,7 @@ TEST_F(ClusteringTest, SampleAndPredict_GPU_L2) {
   int64_t tot=0;
   for (int i=0;i<num_clusters;++i) {
     auto &part = cl->vectors[i];
-    ASSERT_EQ(part.device().type(), torch::kCPU);
+    ASSERT_EQ(part.device().type(), torch::kCUDA);
     ASSERT_EQ(part.size(0), cl->vector_ids[i].size(0));
     tot += part.size(0);
   }

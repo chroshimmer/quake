@@ -252,6 +252,7 @@ struct Clustering {
     Tensor partition_ids;
     vector<Tensor> vectors;
     vector<Tensor> vector_ids;
+    bool is_on_gpu = false;
 
     int64_t ntotal() const {
         int64_t n = 0;

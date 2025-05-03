@@ -68,7 +68,7 @@ public:
     IndexPartition& operator=(IndexPartition&& other) noexcept;
 
     /// Destructor. Frees all allocated memory.
-    ~IndexPartition();
+    virtual ~IndexPartition();
 
     /**
      * @brief Set the code size.
@@ -88,7 +88,7 @@ public:
      * @param new_ids Pointer to the new vector IDs.
      * @param new_codes Pointer to the new encoded vectors.
      */
-    void append(int64_t n_entry, const idx_t* new_ids, const uint8_t* new_codes);
+    virtual void append(int64_t n_entry, const idx_t* new_ids, const uint8_t* new_codes);
 
     /**
      * @brief Update existing entries in place.
@@ -126,7 +126,7 @@ public:
      *
      * Frees all allocated memory and resets the partition state.
      */
-    void clear();
+    virtual void clear();
 
     /**
      * @brief Find the index of a vector by its ID.
@@ -145,7 +145,7 @@ public:
      *
      * @param new_capacity The new capacity (number of vectors).
      */
-    void reallocate_memory(int64_t new_capacity);
+    virtual void reallocate_memory(int64_t new_capacity);
 
     void set_core_id(int core_id);
 

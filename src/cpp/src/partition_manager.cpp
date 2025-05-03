@@ -57,7 +57,8 @@ void PartitionManager::init_partitions(
     size_t code_size_bytes = static_cast<size_t>(dim * sizeof(float));
     partition_store_ = std::make_shared<faiss::DynamicInvertedLists>(
         0,
-        code_size_bytes
+        code_size_bytes,
+        clustering->is_on_gpu
     );
 
     // Set partition ids as [0, 1, 2, ..., nlist-1]

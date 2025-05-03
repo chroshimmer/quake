@@ -14,6 +14,10 @@
 #include <faiss/invlists/InvertedLists.h>
 #include <index_partition.h>
 
+#ifdef QUAKE_ENABLE_GPU
+#include <gpu_index_partition.h>
+#endif
+
 namespace faiss {
     /**
      * @brief A dynamic inverted list implementation using a map of IndexPartition objects.
@@ -31,6 +35,7 @@ namespace faiss {
         int d_;                        ///< Dimensionality of the vectors (derived from code_size).
         int code_size_;                ///< Size in bytes of each vector code.
         unordered_map<size_t, shared_ptr<IndexPartition>> partitions_; ///< Map of partition ID to IndexPartition.
+        bool use_gpu_ = false;               ///< Flag indicating if GPUIndexPartition is used.
 
         /**
          * @brief Constructor for DynamicInvertedLists.
@@ -40,7 +45,7 @@ namespace faiss {
          * @param nlist Number of partitions to initialize.
          * @param code_size Size in bytes for each code.
          */
-        DynamicInvertedLists(size_t nlist, size_t code_size);
+        DynamicInvertedLists(size_t nlist, size_t code_size, bool use_gpu = false);
 
         /**
          * @brief Destructor.

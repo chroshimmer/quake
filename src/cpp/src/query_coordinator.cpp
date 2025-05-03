@@ -535,13 +535,12 @@ shared_ptr<SearchResult> QueryCoordinator::serial_scan(Tensor x, Tensor partitio
                                                             metric_ == faiss::METRIC_L2);
         }
 
-        bool use_gpu_ = search_params->use_gpu;
-        if (use_gpu_) {
+        bool use_gpu = search_params->use_gpu;
+        if (use_gpu) {
             #ifdef QUAKE_ENABLE_GPU
             // define 
-            std::vector<float> all_list_vectors;
-            std::vector<int64_t> all_list_ids;
-            size_t total_list_size = 0;
+            std::vector<Tensor> all_list_vectors;
+            std::vector<Tensor> all_list_ids;
 
             for (int p = 0; p < num_parts; p++) {
                 int64_t pi = partition_ids_accessor[q][p];
@@ -554,16 +553,28 @@ shared_ptr<SearchResult> QueryCoordinator::serial_scan(Tensor x, Tensor partitio
                 int64_t *list_ids = (int64_t *) partition_manager_->partition_store_->get_ids(pi);
                 int64_t list_size = partition_manager_->partition_store_->list_size(pi);
 
-                all_list_vectors.insert(all_list_vectors.end(), list_vectors, list_vectors + list_size * dimension);
-                all_list_ids.insert(all_list_ids.end(), list_ids, list_ids + list_size);
-                total_list_size += list_size;
+                if (list_size == 0) {
+                    continue; // Skip empty lists
+                }
+
+                Tensor vec_tensor = torch::from_blob(list_vectors, {list_size, dimension}, 
+                    torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA)).clone();
+
+                Tensor id_tensor = torch::from_blob(list_ids, {list_size}, 
+                    torch::TensorOptions().dtype(torch::kInt64).device(torch::kCUDA)).clone();
+
+                all_list_vectors.push_back(vec_tensor);
+                all_list_ids.push_back(id_tensor);
             }
+
+            Tensor all_list_vectors_tensor = torch::cat(all_list_vectors, 0);
+            Tensor all_list_ids_tensor = torch::cat(all_list_ids, 0);
 
             gpu_scan_list(
                 query_vec,
-                all_list_vectors.data(),
-                all_list_ids.data(),
-                total_list_size,
+                all_list_vectors_tensor.data_ptr<float>(),
+                all_list_ids_tensor.data_ptr<int64_t>(),
+                all_list_ids_tensor.size(0),
                 dimension,
                 *topk_buf,
                 metric_
