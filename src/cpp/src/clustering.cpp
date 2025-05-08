@@ -52,6 +52,13 @@ shared_ptr<Clustering> kmeans_cuvs_sample_and_predict(
     // 3) move sample to GPU
     Tensor samp_gpu = samp_pts.to(torch::kCUDA, /*non_blocking=*/true).contiguous();
 
+
+    cudaEvent_t start;
+    cudaEvent_t stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start);
+
     // 4) prepare RAFT handle & cuVS params
     raft::resources handle;
     cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
@@ -156,6 +163,13 @@ shared_ptr<Clustering> kmeans_cuvs_sample_and_predict(
     Tensor rest_chunk = cpu_pts.slice(0, off, off + bs);
     predict_fn(rest_chunk, /*off=*/off);
     }
+
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    float elapsed_time_ms;
+    cudaEventElapsedTime(&elapsed_time_ms, start, stop);
+    std::cout << "[Kmeans Build with GPU] Actual Build Compute time: " << elapsed_time_ms << " ms" << std::endl;
+
     // 8) group on CPU
     Tensor sorted_lbl, sorted_idx;
     std::tie(sorted_lbl, sorted_idx) = torch::sort(all_labels);
